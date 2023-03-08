@@ -9,15 +9,18 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
+import com.openhtmltopdf.outputdevice.helper.BaseRendererBuilder;
 import org.apache.pdfbox.io.IOUtils;
+import org.jsoup.Jsoup;
+import org.jsoup.helper.W3CDom;
+import org.jsoup.nodes.Document;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.verapdf.pdfa.Foundries;
@@ -40,7 +43,7 @@ public class PdfATester {
     public static void initialize() {
         VeraGreenfieldFoundryProvider.initialise();
 
-        XRLog.listRegisteredLoggers().forEach(log -> XRLog.setLevel(log, Level.WARNING));
+        XRLog.listRegisteredLoggers().forEach(log -> XRLog.setLevel(log, Level.ALL));
     }
 
     public static <T> Predicate<T> distinctByKey(Function<? super T, ?> keyExtractor) {
@@ -54,42 +57,48 @@ public class PdfATester {
             htmlBytes = IOUtils.toByteArray(is);
         }
         String html = new String(htmlBytes, StandardCharsets.UTF_8);
-        
+
         Files.createDirectories(Paths.get("target/test/artefacts/"));
         if (!Files.exists(Paths.get("target/test/artefacts/Karla-Bold.ttf"))) {
             try (InputStream in = PdfATester.class.getResourceAsStream("/fonts/Karla-Bold.ttf")) {
                 Files.write(Paths.get("target/test/artefacts/Karla-Bold.ttf"), IOUtils.toByteArray(in));
             }
         }
-        
-        byte[] pdfBytes;
-        
-            PdfRendererBuilder builder = new PdfRendererBuilder();
-            builder.useFastMode();
-            //builder.testMode(true);
-            builder.usePdfVersion(conform.getPart() == 1 ? 1.4f : 1.5f);
-            builder.usePdfAConformance(conform);
-            builder.useFont(new File("target/test/artefacts/Karla-Bold.ttf"), "TestFont");
-            builder.withHtmlContent(html, PdfATester.class.getResource("/html/").toString());
 
-            // File embeds are blocked by default, allow everything.
-            builder.useExternalResourceAccessControl((uri, type) -> true, ExternalResourceControlPriority.RUN_AFTER_RESOLVING_URI);
-            builder.useExternalResourceAccessControl((uri, type) -> true, ExternalResourceControlPriority.RUN_BEFORE_RESOLVING_URI);
-
-            try (InputStream colorProfile = PdfATester.class.getResourceAsStream("/colorspaces/sRGB.icc")) {
-                byte[] colorProfileBytes = IOUtils.toByteArray(colorProfile);
-                builder.useColorProfile(colorProfileBytes);
+        if (!Files.exists(Paths.get("target/test/artefacts/arial.ttf"))) {
+            try (InputStream in = PdfATester.class.getResourceAsStream("/fonts/arial.ttf")) {
+                Files.write(Paths.get("target/test/artefacts/arial.ttf"), IOUtils.toByteArray(in));
             }
-        
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            builder.toStream(baos);
-            builder.run();
-            pdfBytes = baos.toByteArray();
-        
+        }
+
+        byte[] pdfBytes;
+
+        PdfRendererBuilder builder = new PdfRendererBuilder();
+        builder.useFastMode();
+        //builder.testMode(true);
+        builder.usePdfVersion(conform.getPart() == 1 ? 1.4f : 1.5f);
+        builder.usePdfAConformance(conform);
+        builder.useFont(new File("target/test/artefacts/arial.ttf"), "TestFont", 400, BaseRendererBuilder.FontStyle.NORMAL,  true, Collections.singleton(BaseRendererBuilder.FSFontUseCase.FALLBACK_FINAL));
+        builder.withW3cDocument(new W3CDom().fromJsoup(convertToValidXhtml(html)), PdfATester.class.getResource("/html/").toString());
+
+        // File embeds are blocked by default, allow everything.
+        builder.useExternalResourceAccessControl((uri, type) -> true, ExternalResourceControlPriority.RUN_AFTER_RESOLVING_URI);
+        builder.useExternalResourceAccessControl((uri, type) -> true, ExternalResourceControlPriority.RUN_BEFORE_RESOLVING_URI);
+
+        try (InputStream colorProfile = PdfATester.class.getResourceAsStream("/colorspaces/sRGB.icc")) {
+            byte[] colorProfileBytes = IOUtils.toByteArray(colorProfile);
+            builder.useColorProfile(colorProfileBytes);
+        }
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        builder.toStream(baos);
+        builder.run();
+        pdfBytes = baos.toByteArray();
+
         Files.createDirectories(Paths.get("target/test/pdf/"));
         Files.write(Paths.get("target/test/pdf/" + resource + "--" + flavour + ".pdf"), pdfBytes);
-        
-       
+
+
 
         try (VeraPDFFoundry foundry = Foundries.defaultInstance();
              InputStream is = new ByteArrayInputStream(pdfBytes);
@@ -99,20 +108,30 @@ public class PdfATester {
             ValidationResult result = validator.validate(parser);
 
             List<TestAssertion> asserts = result.getTestAssertions().stream()
-                                    .filter(ta -> ta.getStatus() == Status.FAILED)
-                                    .filter(distinctByKey(TestAssertion::getRuleId))
-                                    .collect(Collectors.toList());
-                    
+                    .filter(ta -> ta.getStatus() == Status.FAILED)
+                    .filter(distinctByKey(TestAssertion::getRuleId))
+                    .collect(Collectors.toList());
+
             String errs = asserts.stream()
                     .map(ta -> String.format("%s\n    %s", ta.getMessage().replaceAll("\\s+", " "), ta.getLocation().getContext()))
                     .collect(Collectors.joining("\n    ", "[\n    ", "\n]"));
-            
+
             System.err.format("\nDISTINCT ERRORS(%s--%s) (%d): %s\n", resource, flavour, asserts.size(), errs);
-            
+
             return asserts.isEmpty() && result.isCompliant();
         }
     }
-    
+
+    /*
+    Used to make sure the html document is parsed as valid xhtml.
+    For instance, self closing of meta HTML tag.
+     */
+    private org.jsoup.nodes.Document convertToValidXhtml(String inputHtml) {
+        Document document = Jsoup.parse(inputHtml, "UTF-8");
+        document.outputSettings().syntax(Document.OutputSettings.Syntax.xml);
+        return document;
+    }
+
     /**
      * PDF/A conformance. Issue 326.
      * NOTE: PDF/A1 standards do not support alpha in images.
@@ -122,11 +141,32 @@ public class PdfATester {
         assertTrue(run("all-in-one-no-alpha", PDFAFlavour.PDFA_1_B, PdfAConformance.PDFA_1_B));
     }
 
+    /*
+    Raises a NPE in COSArray.add, in PdfBoxAccessibilityHelper#finishNumberTree.
+    
+    Workaround: 
+    1. Use the karla font (but doesn't support non-western characters).
+    2. Or, disable PDF A1A compliance - I understand that the "finishNumberTree" is triggered on A1A compliance only for accessibility purposes.
+     */
+    @Test
+    public void cannotRenderInArial() throws Exception {
+        assertTrue(run("cannot-render-in-arial", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
+    }
+
+    /*
+    Same HTML document than "cannot-render-in-arial.html", but shorter.
+    Everything works, even in Arial
+     */
+    @Test
+    public void canRenderInArial() throws Exception {
+        assertTrue(run("can-render-in-arial", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
+    }
+
     @Test
     public void testAllInOnePdfA1a() throws Exception {
         assertTrue(run("all-in-one-no-alpha", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
     }
-    
+
     @Test
     public void testAllInOnePdfA2b() throws Exception {
         assertTrue(run("all-in-one", PDFAFlavour.PDFA_2_B, PdfAConformance.PDFA_2_B));
@@ -136,7 +176,7 @@ public class PdfATester {
     public void testAllInOnePdfA2a() throws Exception {
         assertTrue(run("all-in-one", PDFAFlavour.PDFA_2_A, PdfAConformance.PDFA_2_A));
     }
-    
+
     @Test
     public void testAllInOnePdfA2u() throws Exception {
         assertTrue(run("all-in-one", PDFAFlavour.PDFA_2_U, PdfAConformance.PDFA_2_U));
