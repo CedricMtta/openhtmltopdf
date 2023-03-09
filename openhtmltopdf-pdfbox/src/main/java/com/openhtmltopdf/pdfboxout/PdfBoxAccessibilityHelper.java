@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 
 import com.openhtmltopdf.util.LogMessageId;
 import org.apache.pdfbox.cos.COSArray;
@@ -41,6 +42,8 @@ import com.openhtmltopdf.render.RenderingContext;
 import com.openhtmltopdf.util.XRLog;
 
 public class PdfBoxAccessibilityHelper {
+    private static final List<GenericContentItem> genericContentItemNotFinished = new ArrayList<>();
+    private static final List<AbstractStructualElement> abstractStructuralElementsAddedByEnsureAncestorTree = new ArrayList<>();
     // This maps from page to a list of content items, we need to process in page order, so a linked map.
     private final Map<PDPage, PageItems> _pageItemsMap = new LinkedHashMap<>();
     private final PdfBoxFastOutputDevice _od;
@@ -93,6 +96,17 @@ public class PdfBoxAccessibilityHelper {
     private static class PageItems {
         final List<GenericContentItem> _contentItems = new ArrayList<>();
         final List<AnnotationWithStructureParent> _pageAnnotations = new ArrayList<>();
+        
+        // Added for debug purpose
+        public void addContentItem(GenericContentItem genericContentItem) {
+            // Parent always null at this step
+//            if(genericContentItem.parentElem==null){
+//                System.err.println("Adding generic content item with null parent!");
+//                System.err.println(genericContentItem);
+//            }
+            genericContentItemNotFinished.add(genericContentItem);
+            _contentItems.add(genericContentItem);
+        }
     }
     
     /**
@@ -773,6 +787,9 @@ public class PdfBoxAccessibilityHelper {
                 // we can just use the dict with mcid in it only.
                 child.parentElem = parent.elem;
                 child.parentElem.appendKid(new PDMarkedContent(isReplaced ? COSName.getPDFName("Figure") : COSName.getPDFName("Span"), child.dict));
+                if(child.parentElem == null) {
+                    System.out.println("Null parent elem in finish function, if branch");
+                }
             } else {
                 // Otherwise we need a more complete dict with the page.
                 child.parentElem = parent.elem;
@@ -783,7 +800,12 @@ public class PdfBoxAccessibilityHelper {
 
                 PDMarkedContentReference ref = new PDMarkedContentReference(child.dict);
                 child.parentElem.appendKid(ref);
+                if(child.parentElem == null) {
+                    System.out.println("Null parent elem in finish function, else branch");
+                }
             }
+            
+            genericContentItemNotFinished.remove(this);
         }
     }
 
@@ -847,6 +869,17 @@ public class PdfBoxAccessibilityHelper {
     public void finishNumberTree() {
         COSArray numTree = new COSArray();
         int i = 0;
+    // _pageItemsMap.entrySet().stream().flatMap(es -> es.getValue()._contentItems.stream()).filter(genericContentItem -> genericContentItem.parentElem == null).toList()
+    // 174 elements => Matching the genericContentItemNotFinished static list    
+        
+        System.err.println("abstractStructuralElementsAddedByEnsureAncestorTree.size="+abstractStructuralElementsAddedByEnsureAncestorTree.size());
+        List<AbstractTreeItem> aseChildren = abstractStructuralElementsAddedByEnsureAncestorTree.stream().flatMap(ase -> ((GenericStructualElement)ase).children.stream()
+                .flatMap(gseChild -> ((GenericStructualElement)gseChild).children.stream()
+                        .flatMap(gseGrandChild -> ((GenericStructualElement)gseGrandChild).children.stream())
+                )
+        ).collect(Collectors.toList());
+        System.err.println("genericContentItemNotFinished.stream().map(gci -> gci.parent).collect(Collectors.toSet()).size()="+genericContentItemNotFinished.stream().map(gci -> gci.parent).collect(Collectors.toSet()).size());
+//        genericContentItemNotFinished.forEach(gci -> gci.finish(gci.parent));
         
         for (Map.Entry<PDPage, PageItems> entry : _pageItemsMap.entrySet()) {
             List<GenericContentItem> pageItems = entry.getValue()._contentItems;
@@ -855,6 +888,11 @@ public class PdfBoxAccessibilityHelper {
             COSArray mcidParentReferences = new COSArray();
             
             for (GenericContentItem contentItem : pageItems) {
+//                if(contentItem.parentElem==null) {
+//                    System.err.println("NULL PARENT ELEM !");
+//                    System.err.println(contentItem.toString());
+//                    System.err.println("Page : " + i);
+//                }
                 mcidParentReferences.add(contentItem.parentElem);
             }
         
@@ -895,6 +933,7 @@ public class PdfBoxAccessibilityHelper {
         }
     }
     
+    // TODO  I suppose one of those two methods is not call on every item, as it should. Todo: add a static list and do the diff to see what elements are not finished
     private static void finishTreeItems(List<? extends AbstractTreeItem> children, AbstractStructualElement parent) {
         for (AbstractTreeItem child : children) {
             child.finish(parent);
@@ -913,16 +952,27 @@ public class PdfBoxAccessibilityHelper {
     }
     
     private void ensureAncestorTree(AbstractTreeItem child, Box parent) {
+        int abstractStructuralElementCreated = 0;
         // Walk up the ancestor tree making sure they all have accessibility objects.
         while (parent != null && parent.getAccessibilityObject() == null) {
-            AbstractStructualElement parentItem = createStructureItem(null, parent);
-            parent.setAccessiblityObject(parentItem);
+            abstractStructuralElementCreated++;
+            AbstractStructualElement newlyCreatedAccessibilityObject = createStructureItem(null, parent);
+            parent.setAccessiblityObject(newlyCreatedAccessibilityObject);
             
-            parentItem.addChild(child);
+            newlyCreatedAccessibilityObject.addChild(child);
+            child.parent = newlyCreatedAccessibilityObject;
             
-            child.parent = parentItem;
-            child = parentItem;
+            child = newlyCreatedAccessibilityObject;
             parent = parent.getParent();
+            abstractStructuralElementsAddedByEnsureAncestorTree.add(newlyCreatedAccessibilityObject);
+        }
+        if(abstractStructuralElementCreated != 0) {
+            AbstractStructualElement alreadyExistingAccessibilityObject = (AbstractStructualElement) parent.getAccessibilityObject();
+            child.parent = alreadyExistingAccessibilityObject;
+            alreadyExistingAccessibilityObject.addChild(child);
+            // With openSans or karla font, no abstract structural element are created.
+            // With Arial, 174 elements are created with the html "cannot-render-in-arial".
+            System.err.println("Ensure ancestor tree created " + abstractStructuralElementCreated + "abstract structural element");
         }
     }
     
@@ -1024,7 +1074,7 @@ public class PdfBoxAccessibilityHelper {
         current.dict = createMarkedContentDictionary();
         current.page = _page;
         
-        _pageItems._contentItems.add(current);
+        _pageItems.addContentItem(current);
 
         return current;
     }
@@ -1040,7 +1090,7 @@ public class PdfBoxAccessibilityHelper {
         li.label.addChild(current);
         current.parent = li.label;
         
-        _pageItems._contentItems.add(current);
+        _pageItems.addContentItem(current);
 
         return current;
     }
@@ -1066,7 +1116,7 @@ public class PdfBoxAccessibilityHelper {
 
         parent.content = current;
         
-        _pageItems._contentItems.add(current);
+        _pageItems.addContentItem(current);
         
         return current;
     }

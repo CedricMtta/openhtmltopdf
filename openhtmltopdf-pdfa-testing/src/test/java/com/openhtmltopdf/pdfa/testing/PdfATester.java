@@ -2,10 +2,7 @@ package com.openhtmltopdf.pdfa.testing;
 
 import static org.junit.Assert.assertTrue;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.InputStream;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -43,7 +40,7 @@ public class PdfATester {
     public static void initialize() {
         VeraGreenfieldFoundryProvider.initialise();
 
-        XRLog.listRegisteredLoggers().forEach(log -> XRLog.setLevel(log, Level.ALL));
+        XRLog.listRegisteredLoggers().forEach(log -> XRLog.setLevel(log, Level.SEVERE));
     }
 
     public static <T> Predicate<T> distinctByKey(Function<? super T, ?> keyExtractor) {
@@ -58,18 +55,9 @@ public class PdfATester {
         }
         String html = new String(htmlBytes, StandardCharsets.UTF_8);
 
-        Files.createDirectories(Paths.get("target/test/artefacts/"));
-        if (!Files.exists(Paths.get("target/test/artefacts/Karla-Bold.ttf"))) {
-            try (InputStream in = PdfATester.class.getResourceAsStream("/fonts/Karla-Bold.ttf")) {
-                Files.write(Paths.get("target/test/artefacts/Karla-Bold.ttf"), IOUtils.toByteArray(in));
-            }
-        }
-
-        if (!Files.exists(Paths.get("target/test/artefacts/arial.ttf"))) {
-            try (InputStream in = PdfATester.class.getResourceAsStream("/fonts/arial.ttf")) {
-                Files.write(Paths.get("target/test/artefacts/arial.ttf"), IOUtils.toByteArray(in));
-            }
-        }
+        copyResourceFontIntoTarget("Karla-Bold.ttf");
+        copyResourceFontIntoTarget("arial.ttf");
+        copyResourceFontIntoTarget("OpenSans-Regular.ttf");
 
         byte[] pdfBytes;
 
@@ -122,6 +110,15 @@ public class PdfATester {
         }
     }
 
+    private static void copyResourceFontIntoTarget(String fontName) throws IOException {
+        Files.createDirectories(Paths.get("target/test/artefacts/"));
+        if (!Files.exists(Paths.get("target/test/artefacts/" + fontName))) {
+            try (InputStream in = PdfATester.class.getResourceAsStream("/fonts/" + fontName)) {
+                Files.write(Paths.get("target/test/artefacts/" + fontName), IOUtils.toByteArray(in));
+            }
+        }
+    }
+
     /*
     Used to make sure the html document is parsed as valid xhtml.
     For instance, self closing of meta HTML tag.
@@ -159,7 +156,9 @@ public class PdfATester {
      */
     @Test
     public void canRenderInArial() throws Exception {
-        assertTrue(run("can-render-in-arial", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
+//        assertTrue(run("can-render-in-arial", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
+        assertTrue(run("bulgar-document", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
+        assertTrue(run("greek-document", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
     }
 
     @Test
