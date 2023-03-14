@@ -243,6 +243,7 @@ public class PdfBoxFastOutputDevice extends AbstractOutputDevice implements Outp
 
         setStrokeDiff(_stroke, null);
         
+        // TODO moschece: Commenting this out has no impact on size
         if (_pdfUa != null) {
             _pdfUa.startPage(_page, _cp, _renderingContext, _pageHeight, _transform);
         }
@@ -265,6 +266,7 @@ public class PdfBoxFastOutputDevice extends AbstractOutputDevice implements Outp
         _cp.closeContent();
         popState();
         
+        // TODO moschece: Commenting this has no impact on size
         if (_pdfUa != null) {
             _pdfUa.endPage();
         }
@@ -885,12 +887,14 @@ public class PdfBoxFastOutputDevice extends AbstractOutputDevice implements Outp
         _linkManager = new PdfBoxFastLinkManager(_sharedContext, _dotsPerPoint, _root, this);
         loadMetadata(doc);
         
+        // TODO moschece: commenting this has big impact on size
         if (_pdfUaConform) {
             _pdfUa = new PdfBoxAccessibilityHelper(this, _root, doc);
         }
     }
 
     public void finish(RenderingContext c, Box root) {
+        // TODO moschece: Uncommenting this allows to pass vera pdf with super small size
         if (_pdfUa != null) {
             _pdfUa.finishPdfUa();
         }
@@ -902,11 +906,11 @@ public class PdfBoxFastOutputDevice extends AbstractOutputDevice implements Outp
 
         // Also need access to the structure tree.
         processControls();
-        _linkManager.processLinks(_pdfUa);
+//        _linkManager.processLinks(_pdfUa);
         
-        if (_pdfUa != null) {
-            _pdfUa.finishNumberTree();
-        }
+//        if (_pdfUa != null) {
+//            _pdfUa.finishNumberTree();
+//        }
     }
     
     @Override
@@ -1301,17 +1305,17 @@ public class PdfBoxFastOutputDevice extends AbstractOutputDevice implements Outp
 
     @Override
     public Object startStructure(StructureType type, Box box) {
-        if (_pdfUa != null) {
-            return _pdfUa.startStructure(type, box);
-        }
+//        if (_pdfUa != null) {
+//            return _pdfUa.startStructure(type, box);
+//        }
         return null;
     }
 
     @Override
     public void endStructure(Object token) {
-        if (_pdfUa != null) {
-            _pdfUa.endStructure(token);
-        }
+//        if (_pdfUa != null) {
+//            _pdfUa.endStructure(token);
+//        }
     }
     
 }

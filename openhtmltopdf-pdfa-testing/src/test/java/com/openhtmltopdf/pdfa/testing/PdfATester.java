@@ -151,6 +151,20 @@ public class PdfATester {
     }
 
     /*
+    Generate 38MB, in 1M14s
+    Without finishNumberTree
+    
+    Ted schema: 
+    20s
+    
+     */
+    @Test
+    public void bigHtml() throws Exception {
+//        assertTrue(run("200_lot_eform", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
+        assertTrue(run("ted_schema_4MB", PDFAFlavour.PDFA_1_A, PdfAConformance.PDFA_1_A));
+    }
+
+    /*
     Same HTML document than "cannot-render-in-arial.html", but shorter.
     Everything works, even in Arial
      */
